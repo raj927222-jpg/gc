@@ -1,0 +1,6 @@
+{
+  "name": "GYUTARO COLLECTION",
+  "description": "A cinematic luxury men's fashion brand and e-commerce experience based in Surat, Gujarat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
