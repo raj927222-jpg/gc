@@ -4,7 +4,6 @@ import {
   X,
   Heart,
   ShoppingBag,
-  RotateCw,
   Sparkles,
   Truck,
   ShieldCheck,
@@ -16,7 +15,6 @@ import {
   Lock
 } from 'lucide-react';
 import { Product, ProductColor } from '../types';
-import { Viewer360 } from './Viewer360';
 import { SizeGuideModal } from './SizeGuideModal';
 
 interface ProductDetailModalProps {
@@ -46,7 +44,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 }) => {
   if (!isOpen || !product) return null;
 
-  const [selectedView, setSelectedView] = useState<'front' | 'back' | 'detail' | 'model' | '360'>('front');
+  const [selectedView, setSelectedView] = useState<'front'>('front');
   const [selectedColor, setSelectedColor] = useState<ProductColor>(product.colors[0] || {
     name: 'Imperial Obsidian',
     hex: '#0A0A0C',
@@ -86,20 +84,9 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const views = [
     { id: 'front', label: 'Front View', img: product.images.front },
-    { id: 'back', label: 'Back View', img: product.images.back },
-    { id: 'detail', label: 'Artisan Detail', img: product.images.detail },
-    { id: 'model', label: 'Lookbook Fit', img: product.images.model },
-    { id: '360', label: '360° Rotate', is360: true },
   ];
 
-  const currentMainImage =
-    selectedView === 'front'
-      ? product.images.front
-      : selectedView === 'back'
-      ? product.images.back
-      : selectedView === 'detail'
-      ? product.images.detail
-      : product.images.model;
+  const currentMainImage = product.images.front;
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -187,45 +174,38 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             <div className="lg:col-span-7 flex flex-col gap-4">
               {/* Main Visual Display */}
               <div className="relative w-full rounded-xl overflow-hidden bg-[#0A0A0C] border border-[#D4AF37]/20 flex items-center justify-center min-h-[380px] sm:min-h-[480px]">
-                {selectedView === '360' ? (
-                  <Viewer360
-                    images={product.rotation360Images}
-                    productName={product.name}
+                <div
+                  onMouseEnter={() => setIsZooming(true)}
+                  onMouseLeave={() => setIsZooming(false)}
+                  onMouseMove={handleMouseMove}
+                  className="relative w-full h-full min-h-[380px] sm:min-h-[480px] flex items-center justify-center cursor-crosshair overflow-hidden group"
+                >
+                  <img
+                    src={currentMainImage}
+                    alt={product.name}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full max-h-[520px] object-cover object-center transition-transform duration-300"
+                    style={
+                      isZooming
+                        ? {
+                            transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
+                            transform: 'scale(1.8)',
+                          }
+                        : { transform: 'scale(1)' }
+                    }
                   />
-                ) : (
-                  <div
-                    onMouseEnter={() => setIsZooming(true)}
-                    onMouseLeave={() => setIsZooming(false)}
-                    onMouseMove={handleMouseMove}
-                    className="relative w-full h-full min-h-[380px] sm:min-h-[480px] flex items-center justify-center cursor-crosshair overflow-hidden group"
-                  >
-                    <img
-                      src={currentMainImage}
-                      alt={product.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full max-h-[520px] object-cover object-center transition-transform duration-300"
-                      style={
-                        isZooming
-                          ? {
-                              transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
-                              transform: 'scale(1.8)',
-                            }
-                          : { transform: 'scale(1)' }
-                      }
-                    />
 
-                    {/* Magnifier indicator hint */}
-                    {!isZooming && (
-                      <div className="absolute bottom-3 right-3 px-3 py-1 rounded-full bg-[#0A0A0C]/70 backdrop-blur-md text-[10px] tracking-widest text-[#ECE7DA]/70 border border-[#D4AF37]/20 pointer-events-none">
-                        HOVER TO MAGNIFY
-                      </div>
-                    )}
-                  </div>
-                )}
+                  {/* Magnifier indicator hint */}
+                  {!isZooming && (
+                    <div className="absolute bottom-3 right-3 px-3 py-1 rounded-full bg-[#0A0A0C]/70 backdrop-blur-md text-[10px] tracking-widest text-[#ECE7DA]/70 border border-[#D4AF37]/20 pointer-events-none">
+                      HOVER TO MAGNIFY
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* View Switcher Thumbnails */}
-              <div className="grid grid-cols-5 gap-2 sm:gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 {views.map((v) => {
                   const isActive = selectedView === v.id;
                   return (
@@ -233,25 +213,18 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                       key={v.id}
                       id={`view-thumb-${v.id}`}
                       onClick={() => setSelectedView(v.id as any)}
-                      className={`relative rounded-lg overflow-hidden border p-1 transition-all duration-300 flex flex-col items-center justify-center cursor-pointer ${
+                      className={`relative rounded-lg overflow-hidden border p-1 transition-all duration-300 flex flex-col items-center justify-center cursor-pointer w-24 sm:w-28 ${
                         isActive
                           ? 'border-[#D4AF37] bg-[#D4AF37]/10 shadow-[0_0_15px_rgba(212,175,55,0.3)]'
                           : 'border-[#D4AF37]/20 bg-[#0E0D14] hover:border-[#D4AF37]/50'
                       }`}
                     >
-                      {v.is360 ? (
-                        <div className="aspect-[4/3] w-full flex flex-col items-center justify-center gap-1 text-[#D4AF37]">
-                          <RotateCw className="w-5 h-5 animate-spin-slow" />
-                          <span className="text-[9px] font-bold tracking-wider font-cinzel">360°</span>
-                        </div>
-                      ) : (
-                        <img
-                          src={v.img}
-                          alt={v.label}
-                          referrerPolicy="no-referrer"
-                          className="aspect-[4/3] w-full object-cover rounded"
-                        />
-                      )}
+                      <img
+                        src={v.img}
+                        alt={v.label}
+                        referrerPolicy="no-referrer"
+                        className="aspect-[4/3] w-full object-cover rounded"
+                      />
                       <span className="text-[9px] tracking-wider uppercase font-medium text-[#ECE7DA]/80 mt-1 line-clamp-1">
                         {v.label}
                       </span>
