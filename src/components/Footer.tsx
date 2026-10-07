@@ -13,11 +13,10 @@ import {
 } from 'lucide-react';
 
 interface FooterProps {
-  onOpenAdmin: () => void;
   onOpenAuth: () => void;
 }
 
-export const Footer: React.FC<FooterProps> = ({ onOpenAdmin, onOpenAuth }) => {
+export const Footer: React.FC<FooterProps> = ({ onOpenAuth }) => {
   const [newsletterEmail, setNewsletterEmail] = useState('');
   const [newsletterSubscribed, setNewsletterSubscribed] = useState(false);
 
@@ -173,16 +172,6 @@ export const Footer: React.FC<FooterProps> = ({ onOpenAdmin, onOpenAuth }) => {
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between text-[11px] text-[#ECE7DA]/40 gap-4">
           <div className="flex items-center gap-2">
             <span>© {new Date().getFullYear()} GYUTARO COLLECTION. ALL RIGHTS RESERVED.</span>
-            <span>•</span>
-            <button
-              id="btn-footer-admin-login"
-              onClick={onOpenAdmin}
-              title="Atelier Internal Access"
-              className="text-[#ECE7DA]/25 hover:text-[#D4AF37] transition-colors inline-flex items-center gap-1 cursor-pointer font-mono text-[10px]"
-            >
-              <ShieldCheck className="w-3 h-3 opacity-60" />
-              <span>STAFF</span>
-            </button>
           </div>
           <div className="flex items-center gap-6">
             <span>TERMS OF ATELIER</span>

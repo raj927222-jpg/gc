@@ -17,7 +17,7 @@ import {
   Check
 } from 'lucide-react';
 import { CartItem, CustomerOrder, UserAccount, ShippingConfig } from '../types';
-import { insertOrderToSupabase } from '../utils/supabaseDb';
+import { insertOrderToMongo } from '../utils/mongoDb';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -146,9 +146,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       setCompletedOrder(newOrder);
       onOrderComplete(newOrder);
 
-      // Persist to Supabase Database
-      insertOrderToSupabase(newOrder).catch((err) => {
-        console.warn('[Supabase Sync] Order save warning:', err);
+      // Persist to MongoDB Database
+      insertOrderToMongo(newOrder).catch((err) => {
+        console.warn('[MongoDB Sync] Order save warning:', err);
       });
 
       setIsProcessing(false);

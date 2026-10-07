@@ -1,6 +1,6 @@
 import { RegisteredUser, UserAccount } from '../types';
 import { safeStorage } from './storage';
-import { insertUserToSupabase, fetchUsersFromSupabase } from './supabaseDb';
+import { insertUserToMongo, fetchUsersFromMongo } from './mongoDb';
 
 const REGISTERED_USERS_KEY = 'gc_registered_users';
 
@@ -135,9 +135,9 @@ export function registerUser(data: {
   const updatedList = [...users, newUser];
   saveRegisteredUsers(updatedList);
 
-  // Background sync to Supabase database
-  insertUserToSupabase(newUser).catch((err) => {
-    console.warn('[Supabase Sync] User save warning:', err);
+  // Background sync to MongoDB database
+  insertUserToMongo(newUser).catch((err) => {
+    console.warn('[MongoDB Sync] User save warning:', err);
   });
 
   return { success: true, user: newUser };
@@ -262,9 +262,9 @@ export function registerOrLoginGoogleUser(profile: {
     users[existingIdx] = updatedUser;
     saveRegisteredUsers(users);
 
-    // Sync to Supabase in background
-    insertUserToSupabase(updatedUser).catch((err) => {
-      console.warn('[Supabase Sync] Google user update warning:', err);
+    // Sync to MongoDB in background
+    insertUserToMongo(updatedUser).catch((err) => {
+      console.warn('[MongoDB Sync] Google user update warning:', err);
     });
 
     return { success: true, user: updatedUser };
@@ -298,20 +298,20 @@ export function registerOrLoginGoogleUser(profile: {
   const updatedList = [...users, newUser];
   saveRegisteredUsers(updatedList);
 
-  // Sync to Supabase in background
-  insertUserToSupabase(newUser).catch((err) => {
-    console.warn('[Supabase Sync] New Google user save warning:', err);
+  // Sync to MongoDB in background
+  insertUserToMongo(newUser).catch((err) => {
+    console.warn('[MongoDB Sync] New Google user save warning:', err);
   });
 
   return { success: true, user: newUser };
 }
 
 /**
- * Fetches all registered users from Supabase and merges them with local storage.
+ * Fetches all registered users from MongoDB and merges them with local storage.
  */
-export async function syncRegisteredUsersFromSupabase(): Promise<RegisteredUser[]> {
+export async function syncRegisteredUsersFromMongo(): Promise<RegisteredUser[]> {
   try {
-    const cloudUsers = await fetchUsersFromSupabase();
+    const cloudUsers = await fetchUsersFromMongo();
     if (cloudUsers && cloudUsers.length > 0) {
       const localUsers = getRegisteredUsers();
       const userMap = new Map<string, RegisteredUser>();
@@ -328,7 +328,7 @@ export async function syncRegisteredUsersFromSupabase(): Promise<RegisteredUser[
       return merged;
     }
   } catch (err) {
-    console.warn('[Supabase Sync] Users sync exception:', err);
+    console.warn('[MongoDB Sync] Users sync exception:', err);
   }
   return getRegisteredUsers();
 }

@@ -45,19 +45,18 @@ import { LUXURY_COLORS } from '../data/products';
 import { compressImageFile } from '../utils/storage';
 import { getRegisteredUsers } from '../utils/authStorage';
 import {
-  checkSupabaseHealth,
-  syncAllProductsToSupabase,
-  syncAllOrdersToSupabase,
-  syncAllUsersToSupabase,
-  saveShippingConfigToSupabase,
-  SUPABASE_SQL_SCHEMA,
-  SupabaseHealthStatus,
-} from '../utils/supabaseDb';
-import {
-  SUPABASE_PROJECT_ID,
-  SUPABASE_DEFAULT_URL,
-  SUPABASE_DEFAULT_ANON_KEY,
-} from '../utils/supabaseClient';
+  checkMongoHealth,
+  configureMongoUri,
+  syncAllProductsToMongo,
+  syncAllOrdersToMongo,
+  syncAllUsersToMongo,
+  saveShippingConfigToMongo,
+  MongoHealthStatus,
+  buildAtlasUri,
+  DEFAULT_ATLAS_USER,
+  DEFAULT_ATLAS_CLUSTER,
+  DEFAULT_ATLAS_URI_TEMPLATE,
+} from '../utils/mongoDb';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -99,37 +98,83 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'PRODUCTS' | 'ORDERS' | 'CUSTOMERS' | 'INVENTORY' | 'SHIPPING' | 'DATABASE' | 'CONTENT'>('OVERVIEW');
 
-  // Supabase Database State
-  const [supabaseHealth, setSupabaseHealth] = useState<SupabaseHealthStatus | null>(null);
+  // MongoDB Database State
+  const [mongoHealth, setMongoHealth] = useState<MongoHealthStatus | null>(null);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [isSyncingData, setIsSyncingData] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState('');
-  const [copiedSql, setCopiedSql] = useState(false);
+  const [mongoUriInput, setMongoUriInput] = useState(DEFAULT_ATLAS_URI_TEMPLATE);
+  const [atlasPasswordInput, setAtlasPasswordInput] = useState('');
+  const [showAtlasPassword, setShowAtlasPassword] = useState(false);
+  const [connectMethod, setConnectMethod] = useState<'ATLAS_PASSWORD' | 'FULL_URI'>('ATLAS_PASSWORD');
+  const [dbExplorerTab, setDbExplorerTab] = useState<'USERS' | 'ORDERS' | 'PRODUCTS'>('USERS');
+  const [isConnectingMongo, setIsConnectingMongo] = useState(false);
+  const [copiedDoc, setCopiedDoc] = useState(false);
 
-  // Initial Supabase health check
+  // Initial MongoDB health check
   React.useEffect(() => {
     if (isAuthenticated) {
-      handleCheckSupabaseHealth();
+      handleCheckMongoHealth();
     }
   }, [isAuthenticated]);
 
-  const handleCheckSupabaseHealth = async () => {
+  const handleCheckMongoHealth = async () => {
     setIsCheckingHealth(true);
     try {
-      const status = await checkSupabaseHealth();
-      setSupabaseHealth(status);
+      const status = await checkMongoHealth();
+      setMongoHealth(status);
     } catch (e: any) {
-      console.warn('Health check exception:', e);
+      console.warn('MongoDB health check exception:', e);
     } finally {
       setIsCheckingHealth(false);
     }
   };
 
-  const handleCopySql = () => {
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
-      setCopiedSql(true);
-      setTimeout(() => setCopiedSql(false), 3000);
+  const handleConnectAtlasPassword = async () => {
+    if (!atlasPasswordInput.trim()) {
+      triggerSyncMsg('Please enter your MongoDB Atlas password for user raj927222_db_user.');
+      return;
+    }
+    setIsConnectingMongo(true);
+    try {
+      const fullUri = buildAtlasUri(atlasPasswordInput.trim());
+      const res = await configureMongoUri(fullUri);
+      triggerSyncMsg(res.message);
+      await handleCheckMongoHealth();
+      if (res.success) {
+        setAtlasPasswordInput('');
+        // Automatically push existing users, orders, and products to MongoDB Atlas!
+        handleSyncAllToMongo();
+      }
+    } catch (err: any) {
+      triggerSyncMsg(`Connection error: ${err?.message || 'Failed to connect to Atlas'}`);
+    } finally {
+      setIsConnectingMongo(false);
+    }
+  };
+
+  const handleConnectMongoUri = async () => {
+    if (!mongoUriInput.trim()) {
+      triggerSyncMsg('Please enter a valid MongoDB connection string (e.g. mongodb+srv://...)');
+      return;
+    }
+    if (mongoUriInput.includes('<db_password>')) {
+      triggerSyncMsg('Please replace <db_password> with your actual MongoDB Atlas password.');
+      return;
+    }
+    setIsConnectingMongo(true);
+    try {
+      const res = await configureMongoUri(mongoUriInput.trim());
+      triggerSyncMsg(res.message);
+      await handleCheckMongoHealth();
+      if (res.success) {
+        setMongoUriInput('');
+        handleSyncAllToMongo();
+      }
+    } catch (err: any) {
+      triggerSyncMsg(`Connection error: ${err?.message || 'Failed to connect'}`);
+    } finally {
+      setIsConnectingMongo(false);
     }
   };
 
@@ -138,29 +183,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setTimeout(() => setSyncStatusMsg(''), 4500);
   };
 
-  const handleSyncAllToSupabase = async () => {
+  const handleSyncAllToMongo = async () => {
     setIsSyncingData(true);
     try {
       // 1. Sync Products
-      const prodRes = await syncAllProductsToSupabase(products);
+      const prodRes = await syncAllProductsToMongo(products);
       // 2. Sync Orders
-      const orderRes = await syncAllOrdersToSupabase(orders);
+      const orderRes = await syncAllOrdersToMongo(orders);
       // 3. Sync Users
       const users = getRegisteredUsers();
-      const userRes = await syncAllUsersToSupabase(users);
+      const userRes = await syncAllUsersToMongo(users);
       // 4. Sync Shipping Config
-      await saveShippingConfigToSupabase(localShippingConfig);
+      await saveShippingConfigToMongo(localShippingConfig);
 
       // Refresh health
-      await handleCheckSupabaseHealth();
+      await handleCheckMongoHealth();
 
       if (prodRes.success && orderRes.success) {
-        triggerSyncMsg(`Successfully synced ${products.length} products, ${orders.length} orders, and store configurations to Supabase!`);
+        triggerSyncMsg(`Successfully synced ${products.length} products, ${orders.length} orders, ${users.length} users, and configurations to MongoDB!`);
       } else {
-        triggerSyncMsg(`Sync attempted. If tables don't exist yet, run the SQL schema script in your Supabase SQL Editor.`);
+        triggerSyncMsg(prodRes.error || orderRes.error || userRes.error || 'Sync completed. Check MongoDB collection document counts.');
       }
     } catch (err: any) {
-      triggerSyncMsg(`Sync error: ${err?.message || 'Failed to sync with Supabase'}`);
+      triggerSyncMsg(`Sync error: ${err?.message || 'Failed to sync with MongoDB'}`);
     } finally {
       setIsSyncingData(false);
     }
@@ -169,12 +214,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleSyncProductsOnly = async () => {
     setIsSyncingData(true);
     try {
-      const res = await syncAllProductsToSupabase(products);
-      await handleCheckSupabaseHealth();
+      const res = await syncAllProductsToMongo(products);
+      await handleCheckMongoHealth();
       if (res.success) {
-        triggerSyncMsg(`Synced ${products.length} products to Supabase products table!`);
+        triggerSyncMsg(`Synced ${products.length} products to MongoDB products collection!`);
       } else {
-        triggerSyncMsg(`Product sync note: Ensure table public.products is created using the SQL tab.`);
+        triggerSyncMsg(`Product sync note: ${res.error || 'Please connect your MongoDB cluster.'}`);
       }
     } catch (e: any) {
       triggerSyncMsg(`Product sync error: ${e?.message}`);
@@ -186,12 +231,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleSyncOrdersOnly = async () => {
     setIsSyncingData(true);
     try {
-      const res = await syncAllOrdersToSupabase(orders);
-      await handleCheckSupabaseHealth();
+      const res = await syncAllOrdersToMongo(orders);
+      await handleCheckMongoHealth();
       if (res.success) {
-        triggerSyncMsg(`Synced ${orders.length} orders to Supabase orders table!`);
+        triggerSyncMsg(`Synced ${orders.length} orders to MongoDB orders collection!`);
       } else {
-        triggerSyncMsg(`Orders sync note: Ensure table public.orders is created using the SQL tab.`);
+        triggerSyncMsg(`Orders sync note: ${res.error || 'Please connect your MongoDB cluster.'}`);
       }
     } catch (e: any) {
       triggerSyncMsg(`Orders sync error: ${e?.message}`);
@@ -204,12 +249,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setIsSyncingData(true);
     try {
       const users = getRegisteredUsers();
-      const res = await syncAllUsersToSupabase(users);
-      await handleCheckSupabaseHealth();
+      const res = await syncAllUsersToMongo(users);
+      await handleCheckMongoHealth();
       if (res.success) {
-        triggerSyncMsg(`Synced ${users.length} registered accounts to Supabase registered_users table!`);
+        triggerSyncMsg(`Synced ${users.length} registered accounts to MongoDB registered_users collection!`);
       } else {
-        triggerSyncMsg(`Users sync note: Ensure table public.registered_users is created using the SQL tab.`);
+        triggerSyncMsg(`Users sync note: ${res.error || 'Please connect your MongoDB cluster.'}`);
       }
     } catch (e: any) {
       triggerSyncMsg(`Users sync error: ${e?.message}`);
@@ -221,12 +266,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const handleSyncShippingOnly = async () => {
     setIsSyncingData(true);
     try {
-      const ok = await saveShippingConfigToSupabase(localShippingConfig);
-      await handleCheckSupabaseHealth();
+      const ok = await saveShippingConfigToMongo(localShippingConfig);
+      await handleCheckMongoHealth();
       if (ok) {
-        triggerSyncMsg(`Store shipping policy synced to Supabase store_settings!`);
+        triggerSyncMsg(`Store shipping policy synced to MongoDB store_settings collection!`);
       } else {
-        triggerSyncMsg(`Settings sync note: Ensure table public.store_settings is created.`);
+        triggerSyncMsg(`Settings sync note: Ensure MongoDB is connected.`);
       }
     } catch (e: any) {
       triggerSyncMsg(`Settings sync error: ${e?.message}`);
@@ -811,7 +856,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   { id: 'ORDERS', label: `Orders (${orders.length})`, icon: ShoppingBag },
                   { id: 'INVENTORY', label: 'Inventory & Stock', icon: Package },
                   { id: 'SHIPPING', label: 'Shipping Charges', icon: Truck },
-                  { id: 'DATABASE', label: 'Supabase Cloud DB', icon: Database },
+                  { id: 'DATABASE', label: 'MongoDB Database', icon: Database },
                   { id: 'CUSTOMERS', label: 'VIP Clients', icon: Users },
                   { id: 'CONTENT', label: 'Atelier Content', icon: Sparkles },
                 ].map((tab) => {
@@ -2550,7 +2595,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               </div>
             )}
 
-            {/* TAB 8: SUPABASE CLOUD DATABASE INTEGRATION */}
+            {/* TAB 8: MONGODB DATABASE INTEGRATION */}
             {activeTab === 'DATABASE' && (
               <div className="space-y-6 animate-fadeIn pb-12">
                 {/* Header & Status Card */}
@@ -2558,25 +2603,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-pulse" />
-                        <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#10B981] font-cinzel">
-                          SUPABASE CLOUD DATABASE CONNECTED
+                        <span className={`w-2.5 h-2.5 rounded-full ${mongoHealth?.connected ? 'bg-[#10B981] animate-pulse' : 'bg-[#F59E0B]'}`} />
+                        <span className={`text-[10px] font-bold uppercase tracking-[0.25em] font-cinzel ${mongoHealth?.connected ? 'text-[#10B981]' : 'text-[#F59E0B]'}`}>
+                          {mongoHealth?.connected ? 'MONGODB CLUSTER CONNECTED' : 'MONGODB CONFIGURATION READY'}
                         </span>
                       </div>
                       <h3 className="font-cinzel text-xl font-bold text-[#ECE7DA] flex items-center gap-2">
                         <Database className="w-5 h-5 text-[#D4AF37]" />
-                        <span>Supabase Cloud Integration & Live Sync</span>
+                        <span>MongoDB Database Integration & Live Sync</span>
                       </h3>
                       <p className="text-xs text-[#ECE7DA]/70 mt-1 max-w-2xl leading-relaxed">
-                        Your Gyutaro Atelier application is connected to your Supabase PostgreSQL cloud backend for persistent storage across products, customer orders, VIP accounts, and shipping policies.
+                        Your Gyutaro Atelier application uses MongoDB for high-speed document storage across garment products, customer orders, registered VIP accounts, and store settings.
                       </p>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-3">
                       <button
                         type="button"
-                        id="btn-check-supabase-health"
-                        onClick={handleCheckSupabaseHealth}
+                        id="btn-check-mongo-health"
+                        onClick={handleCheckMongoHealth}
                         disabled={isCheckingHealth}
                         className="px-4 py-2.5 rounded-xl border border-[#D4AF37]/30 bg-[#0E0D14] text-xs font-semibold text-[#ECE7DA] hover:border-[#D4AF37] hover:bg-[#14131A] transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                       >
@@ -2586,13 +2631,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
                       <button
                         type="button"
-                        id="btn-sync-all-supabase"
-                        onClick={handleSyncAllToSupabase}
+                        id="btn-sync-all-mongo"
+                        onClick={handleSyncAllToMongo}
                         disabled={isSyncingData}
                         className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#D4AF37] via-[#E8C868] to-[#D4AF37] text-[#0A0A0C] font-bold text-xs tracking-wider uppercase hover:shadow-[0_0_20px_rgba(212,175,55,0.4)] transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
                       >
                         <Cloud className={`w-4 h-4 ${isSyncingData ? 'animate-bounce' : ''}`} />
-                        <span>{isSyncingData ? 'Syncing to Cloud...' : 'Sync All Data to Cloud'}</span>
+                        <span>{isSyncingData ? 'Syncing to MongoDB...' : 'Sync All Data to MongoDB'}</span>
                       </button>
                     </div>
                   </div>
@@ -2606,67 +2651,463 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   )}
                 </div>
 
+                {/* MongoDB Connection URI Config Box */}
+                <div className="p-6 rounded-2xl bg-[#0E0D14] border border-[#D4AF37]/30 shadow-xl space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#D4AF37]/15 text-[#D4AF37] font-mono">
+                          MONGODB ATLAS CLUSTER0
+                        </span>
+                        {mongoHealth?.connected && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#10B981]/15 text-[#10B981] font-mono flex items-center gap-1">
+                            <Check className="w-3 h-3" /> ACTIVE
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="font-cinzel text-base font-bold text-[#ECE7DA] flex items-center gap-2">
+                        <Server className="w-4 h-4 text-[#D4AF37]" />
+                        <span>Connect MongoDB Atlas Database</span>
+                      </h4>
+                      <p className="text-xs text-[#ECE7DA]/70 mt-0.5">
+                        Cluster: <code className="text-[#D4AF37]">{DEFAULT_ATLAS_CLUSTER}</code> • User: <code className="text-[#ECE7DA]">{DEFAULT_ATLAS_USER}</code> • Database: <code className="text-[#ECE7DA]">gyutaro_atelier</code>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#14131A] border border-[#D4AF37]/20">
+                      <button
+                        type="button"
+                        onClick={() => setConnectMethod('ATLAS_PASSWORD')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          connectMethod === 'ATLAS_PASSWORD'
+                            ? 'bg-[#D4AF37] text-[#0A0A0C] font-bold'
+                            : 'text-[#ECE7DA]/70 hover:text-[#ECE7DA]'
+                        }`}
+                      >
+                        Quick Password Connect
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConnectMethod('FULL_URI')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                          connectMethod === 'FULL_URI'
+                            ? 'bg-[#D4AF37] text-[#0A0A0C] font-bold'
+                            : 'text-[#ECE7DA]/70 hover:text-[#ECE7DA]'
+                        }`}
+                      >
+                        Full Connection URI
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Method 1: Quick Password for raj927222_db_user */}
+                  {connectMethod === 'ATLAS_PASSWORD' ? (
+                    <div className="p-4 rounded-xl bg-[#14131A] border border-[#D4AF37]/20 space-y-3">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        <div className="relative flex-1">
+                          <Lock className="w-4 h-4 text-[#D4AF37] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type={showAtlasPassword ? 'text' : 'password'}
+                            id="input-atlas-password"
+                            value={atlasPasswordInput}
+                            onChange={(e) => setAtlasPasswordInput(e.target.value)}
+                            placeholder="Enter password for user raj927222_db_user"
+                            className="w-full bg-[#0E0D14] border border-[#D4AF37]/30 rounded-xl pl-10 pr-10 py-3 text-xs text-[#ECE7DA] font-mono focus:outline-none focus:border-[#D4AF37] placeholder:text-[#ECE7DA]/40"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowAtlasPassword(!showAtlasPassword)}
+                            className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#ECE7DA]/50 hover:text-[#D4AF37] transition-colors cursor-pointer"
+                          >
+                            {showAtlasPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          id="btn-connect-atlas-password"
+                          onClick={handleConnectAtlasPassword}
+                          disabled={isConnectingMongo}
+                          className="px-6 py-3 rounded-xl bg-gradient-to-r from-[#D4AF37] via-[#E8C868] to-[#D4AF37] hover:shadow-[0_0_25px_rgba(212,175,55,0.5)] text-[#0A0A0C] font-bold text-xs tracking-wider uppercase transition-all whitespace-nowrap cursor-pointer shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {isConnectingMongo ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-[#0A0A0C] border-t-transparent rounded-full animate-spin" />
+                              <span>CONNECTING TO ATLAS...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span>CONNECT & SYNC ALL</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-[#ECE7DA]/60">
+                        <span>Target: mongodb+srv://raj927222_db_user:••••••••@cluster0.x70hmm8.mongodb.net/gyutaro_atelier</span>
+                        <span className="text-[#D4AF37]">Automatically syncs all users & orders upon connection</span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Method 2: Full Connection String */
+                    <div className="p-4 rounded-xl bg-[#14131A] border border-[#D4AF37]/20 space-y-3">
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            id="input-mongo-uri"
+                            value={mongoUriInput}
+                            onChange={(e) => setMongoUriInput(e.target.value)}
+                            placeholder="mongodb+srv://raj927222_db_user:<password>@cluster0.x70hmm8.mongodb.net/gyutaro_atelier?appName=Cluster0&compressors=zlib"
+                            className="w-full bg-[#0E0D14] border border-[#D4AF37]/30 rounded-xl px-4 py-3 text-xs text-[#ECE7DA] font-mono focus:outline-none focus:border-[#D4AF37] placeholder:text-[#ECE7DA]/30"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          id="btn-save-mongo-uri"
+                          onClick={handleConnectMongoUri}
+                          disabled={isConnectingMongo}
+                          className="px-6 py-3 rounded-xl bg-[#D4AF37] hover:bg-[#F4E5C3] text-[#0A0A0C] font-bold text-xs tracking-wider uppercase transition-all whitespace-nowrap cursor-pointer shadow-md disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {isConnectingMongo ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-[#0A0A0C] border-t-transparent rounded-full animate-spin" />
+                              <span>CONNECTING...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4" />
+                              <span>CONNECT URI</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[#ECE7DA]/60">
+                        Replace <code className="text-[#EF4444]">&lt;db_password&gt;</code> with your MongoDB Atlas database user password.
+                      </p>
+                    </div>
+                  )}
+
+                  {mongoHealth?.lastError && !mongoHealth.connected && (
+                    <div className="p-3 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-xs text-[#EF4444] flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{mongoHealth.lastError}</span>
+                    </div>
+                  )}
+                </div>
+
                 {/* Connection Details Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20">
-                    <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Project ID</span>
+                    <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Database Name</span>
                     <span className="font-mono text-xs text-[#D4AF37] font-bold mt-1 block truncate">
-                      {SUPABASE_PROJECT_ID}
+                      {mongoHealth?.databaseName || 'gyutaro_atelier'}
                     </span>
                     <span className="text-[10px] text-[#10B981] mt-2 flex items-center gap-1 font-semibold">
-                      <Check className="w-3 h-3" /> Configured & Verified
+                      <Check className="w-3 h-3" /> MongoDB Atlas Database
                     </span>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20">
-                    <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Cloud REST URL</span>
+                    <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Cluster Host</span>
                     <span className="font-mono text-[11px] text-[#ECE7DA] font-semibold mt-1 block truncate">
-                      {SUPABASE_DEFAULT_URL}
+                      {DEFAULT_ATLAS_CLUSTER}
                     </span>
                     <span className="text-[10px] text-[#ECE7DA]/50 mt-2 block">
-                      Region: AWS ap-southeast-1
+                      Region: AWS (Cluster0)
                     </span>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20">
-                    <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Client API Key</span>
+                    <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Database User</span>
                     <span className="font-mono text-[11px] text-[#D4AF37] font-semibold mt-1 block truncate">
-                      {SUPABASE_DEFAULT_ANON_KEY.substring(0, 16)}••••••••
+                      {DEFAULT_ATLAS_USER}
                     </span>
                     <span className="text-[10px] text-[#10B981] mt-2 flex items-center gap-1 font-semibold">
-                      <Check className="w-3 h-3" /> Publishable Anon Key
+                      <Check className="w-3 h-3" /> Read/Write Access
                     </span>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20">
                     <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block font-cinzel">Connection Health</span>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className={`w-2 h-2 rounded-full ${supabaseHealth?.connected ? 'bg-[#10B981]' : 'bg-[#F59E0B]'}`} />
+                      <span className={`w-2 h-2 rounded-full ${mongoHealth?.connected ? 'bg-[#10B981]' : 'bg-[#F59E0B]'}`} />
                       <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">
-                        {supabaseHealth?.connected ? 'Live & Connected' : 'Ready to Query'}
+                        {mongoHealth?.connected ? 'Live & Connected' : 'Awaiting Password'}
                       </span>
                     </div>
                     <span className="text-[10px] text-[#ECE7DA]/50 mt-2 block">
-                      {supabaseHealth?.tables?.products ? 'Tables Verified' : 'Database Ready'}
+                      {mongoHealth?.connected ? 'Atlas Cluster Online' : 'Enter user password to link'}
                     </span>
                   </div>
                 </div>
 
-                {/* Cloud Table Synchronization Bento Grid */}
+                {/* LIVE DATABASE EXPLORER: USERS & ORDERS IN MONGODB ATLAS */}
+                <div className="p-6 rounded-2xl bg-[#0E0D14] border border-[#D4AF37]/25 shadow-xl space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#D4AF37]/20 pb-4">
+                    <div>
+                      <h4 className="font-cinzel text-base font-bold text-[#ECE7DA] flex items-center gap-2">
+                        <Database className="w-4 h-4 text-[#D4AF37]" />
+                        <span>Live Database Records: Users & Orders in MongoDB</span>
+                      </h4>
+                      <p className="text-xs text-[#ECE7DA]/60 mt-0.5">
+                        Real-time inspection of patron accounts and placed couture orders stored in your database.
+                      </p>
+                    </div>
+
+                    {/* Sub-tab Switcher */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        id="btn-db-view-users"
+                        onClick={() => setDbExplorerTab('USERS')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold font-cinzel tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                          dbExplorerTab === 'USERS'
+                            ? 'bg-[#D4AF37] text-[#0A0A0C]'
+                            : 'bg-[#14131A] text-[#ECE7DA]/70 hover:text-[#ECE7DA] border border-[#D4AF37]/20'
+                        }`}
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        <span>Registered Users ({getRegisteredUsers().length})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        id="btn-db-view-orders"
+                        onClick={() => setDbExplorerTab('ORDERS')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold font-cinzel tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                          dbExplorerTab === 'ORDERS'
+                            ? 'bg-[#D4AF37] text-[#0A0A0C]'
+                            : 'bg-[#14131A] text-[#ECE7DA]/70 hover:text-[#ECE7DA] border border-[#D4AF37]/20'
+                        }`}
+                      >
+                        <ShoppingBag className="w-3.5 h-3.5" />
+                        <span>Orders ({orders.length})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        id="btn-db-view-products"
+                        onClick={() => setDbExplorerTab('PRODUCTS')}
+                        className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold font-cinzel tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                          dbExplorerTab === 'PRODUCTS'
+                            ? 'bg-[#D4AF37] text-[#0A0A0C]'
+                            : 'bg-[#14131A] text-[#ECE7DA]/70 hover:text-[#ECE7DA] border border-[#D4AF37]/20'
+                        }`}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Products ({products.length})</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 1. Sub-view: REGISTERED USERS IN MONGODB */}
+                  {dbExplorerTab === 'USERS' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#ECE7DA]/70">
+                          Showing {getRegisteredUsers().length} registered patron records stored for collection <code className="text-[#D4AF37]">registered_users</code>:
+                        </span>
+                        <button
+                          type="button"
+                          id="btn-sync-users-quick"
+                          onClick={handleSyncUsersOnly}
+                          disabled={isSyncingData}
+                          className="px-3 py-1 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-xs font-semibold text-[#D4AF37] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Cloud className="w-3 h-3" />
+                          <span>Push Users to MongoDB</span>
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-xl border border-[#D4AF37]/20">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-[#14131A] text-[#D4AF37] font-cinzel border-b border-[#D4AF37]/20">
+                              <th className="p-3">Patron Name</th>
+                              <th className="p-3">Email Address</th>
+                              <th className="p-3">Mobile Phone</th>
+                              <th className="p-3">Auth Provider</th>
+                              <th className="p-3">Registered On</th>
+                              <th className="p-3">Database ID</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                            {getRegisteredUsers().map((u) => (
+                              <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
+                                <td className="p-3 font-semibold text-[#ECE7DA] flex items-center gap-2">
+                                  <div className="w-6 h-6 rounded-full bg-[#D4AF37]/20 text-[#D4AF37] flex items-center justify-center font-bold text-[10px]">
+                                    {(u.firstName || 'U')[0]}
+                                  </div>
+                                  <span>{u.firstName} {u.lastName}</span>
+                                </td>
+                                <td className="p-3 font-mono text-[#ECE7DA]/80">{u.email}</td>
+                                <td className="p-3 font-mono text-[#D4AF37]">{u.phone}</td>
+                                <td className="p-3">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white/5 text-[#ECE7DA]/80">
+                                    {u.authProvider || 'password'}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-[#ECE7DA]/60">
+                                  {new Date(u.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </td>
+                                <td className="p-3 font-mono text-[10px] text-[#ECE7DA]/40">{u.id}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 2. Sub-view: CUSTOMER ORDERS IN MONGODB */}
+                  {dbExplorerTab === 'ORDERS' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#ECE7DA]/70">
+                          Showing {orders.length} placed customer orders stored for collection <code className="text-[#D4AF37]">orders</code>:
+                        </span>
+                        <button
+                          type="button"
+                          id="btn-sync-orders-quick"
+                          onClick={handleSyncOrdersOnly}
+                          disabled={isSyncingData}
+                          className="px-3 py-1 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-xs font-semibold text-[#D4AF37] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Cloud className="w-3 h-3" />
+                          <span>Push Orders to MongoDB</span>
+                        </button>
+                      </div>
+
+                      {orders.length === 0 ? (
+                        <div className="p-8 rounded-xl bg-[#14131A] text-center border border-white/5">
+                          <ShoppingBag className="w-8 h-8 text-[#D4AF37]/40 mx-auto mb-2" />
+                          <p className="text-xs text-[#ECE7DA]/60">No orders placed yet. Orders confirmed at checkout will appear here.</p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-xl border border-[#D4AF37]/20">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="bg-[#14131A] text-[#D4AF37] font-cinzel border-b border-[#D4AF37]/20">
+                                <th className="p-3">Order Number</th>
+                                <th className="p-3">Customer</th>
+                                <th className="p-3">Date</th>
+                                <th className="p-3">Items</th>
+                                <th className="p-3">Total Payable</th>
+                                <th className="p-3">Payment</th>
+                                <th className="p-3">Status</th>
+                                <th className="p-3">Tracking</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                              {orders.map((o) => (
+                                <tr key={o.id} className="hover:bg-white/[0.02] transition-colors">
+                                  <td className="p-3 font-mono font-bold text-[#D4AF37]">{o.orderNumber}</td>
+                                  <td className="p-3 text-[#ECE7DA]">
+                                    <div className="font-semibold">{o.customer?.firstName} {o.customer?.lastName}</div>
+                                    <div className="text-[10px] text-[#ECE7DA]/50">{o.customer?.email}</div>
+                                  </td>
+                                  <td className="p-3 text-[#ECE7DA]/70">{o.date}</td>
+                                  <td className="p-3 text-[#ECE7DA]/80">{o.items?.length || 0} piece(s)</td>
+                                  <td className="p-3 font-cinzel font-bold text-[#D4AF37]">
+                                    {currencySymbol}{o.total?.toLocaleString('en-IN')}
+                                  </td>
+                                  <td className="p-3">
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#D4AF37]/10 text-[#D4AF37] font-mono">
+                                      {o.paymentMethod}
+                                    </span>
+                                  </td>
+                                  <td className="p-3">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      o.status === 'DELIVERED' ? 'bg-[#10B981]/20 text-[#10B981]' : 'bg-[#F59E0B]/20 text-[#F59E0B]'
+                                    }`}>
+                                      {o.status}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 font-mono text-[10px] text-[#ECE7DA]/60">{o.trackingNumber}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 3. Sub-view: PRODUCTS IN MONGODB */}
+                  {dbExplorerTab === 'PRODUCTS' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-[#ECE7DA]/70">
+                          Showing {products.length} catalog items stored for collection <code className="text-[#D4AF37]">products</code>:
+                        </span>
+                        <button
+                          type="button"
+                          id="btn-sync-products-quick"
+                          onClick={handleSyncProductsOnly}
+                          disabled={isSyncingData}
+                          className="px-3 py-1 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-xs font-semibold text-[#D4AF37] transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Cloud className="w-3 h-3" />
+                          <span>Push Products to MongoDB</span>
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto rounded-xl border border-[#D4AF37]/20 max-h-96">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-[#14131A] text-[#D4AF37] font-cinzel border-b border-[#D4AF37]/20 sticky top-0">
+                              <th className="p-3">Product</th>
+                              <th className="p-3">Category</th>
+                              <th className="p-3">Price</th>
+                              <th className="p-3">Stock Count</th>
+                              <th className="p-3">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/5">
+                            {products.map((p) => (
+                              <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
+                                <td className="p-3 text-[#ECE7DA] flex items-center gap-3">
+                                  <img src={p.images?.front} alt={p.name} className="w-9 h-9 object-cover rounded-lg border border-[#D4AF37]/30 shrink-0" />
+                                  <span className="font-semibold">{p.name}</span>
+                                </td>
+                                <td className="p-3 text-[#ECE7DA]/70">{p.category}</td>
+                                <td className="p-3 font-cinzel font-bold text-[#D4AF37]">
+                                  {currencySymbol}{p.price?.toLocaleString('en-IN')}
+                                </td>
+                                <td className="p-3 font-mono">{p.stockCount} units</td>
+                                <td className="p-3">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    p.inStock ? 'bg-[#10B981]/20 text-[#10B981]' : 'bg-[#EF4444]/20 text-[#EF4444]'
+                                  }`}>
+                                    {p.inStock ? 'IN STOCK' : 'OUT OF STOCK'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* MongoDB Collection Synchronization Bento Grid */}
                 <div>
                   <h4 className="font-cinzel text-sm font-bold text-[#ECE7DA] mb-3 flex items-center gap-2">
                     <Server className="w-4 h-4 text-[#D4AF37]" />
-                    <span>Database Collections & Sync Status</span>
+                    <span>MongoDB Collections & Sync Status</span>
                   </h4>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {/* Products Table Card */}
+                    {/* Products Collection Card */}
                     <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20 flex flex-col justify-between">
                       <div>
                         <div className="flex justify-between items-start mb-2">
-                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">public.products</span>
+                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">products</span>
                           <span className="px-2 py-0.5 rounded text-[10px] bg-[#D4AF37]/15 text-[#D4AF37] font-mono font-bold">
-                            {products.length} items
+                            {mongoHealth?.collections?.products ?? products.length} docs
                           </span>
                         </div>
                         <p className="text-[11px] text-[#ECE7DA]/60 leading-normal mb-3">
@@ -2675,7 +3116,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                       <button
                         type="button"
-                        id="btn-sync-products-cloud"
+                        id="btn-sync-products-mongo"
                         onClick={handleSyncProductsOnly}
                         disabled={isSyncingData}
                         className="w-full py-2 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[11px] font-semibold text-[#D4AF37] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -2685,13 +3126,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </button>
                     </div>
 
-                    {/* Orders Table Card */}
+                    {/* Orders Collection Card */}
                     <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20 flex flex-col justify-between">
                       <div>
                         <div className="flex justify-between items-start mb-2">
-                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">public.orders</span>
+                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">orders</span>
                           <span className="px-2 py-0.5 rounded text-[10px] bg-[#D4AF37]/15 text-[#D4AF37] font-mono font-bold">
-                            {orders.length} orders
+                            {mongoHealth?.collections?.orders ?? orders.length} docs
                           </span>
                         </div>
                         <p className="text-[11px] text-[#ECE7DA]/60 leading-normal mb-3">
@@ -2700,7 +3141,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                       <button
                         type="button"
-                        id="btn-sync-orders-cloud"
+                        id="btn-sync-orders-mongo"
                         onClick={handleSyncOrdersOnly}
                         disabled={isSyncingData}
                         className="w-full py-2 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[11px] font-semibold text-[#D4AF37] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -2710,22 +3151,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </button>
                     </div>
 
-                    {/* Users Table Card */}
+                    {/* Users Collection Card */}
                     <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20 flex flex-col justify-between">
                       <div>
                         <div className="flex justify-between items-start mb-2">
-                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">public.registered_users</span>
+                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">registered_users</span>
                           <span className="px-2 py-0.5 rounded text-[10px] bg-[#D4AF37]/15 text-[#D4AF37] font-mono font-bold">
-                            {getRegisteredUsers().length} users
+                            {mongoHealth?.collections?.registered_users ?? getRegisteredUsers().length} docs
                           </span>
                         </div>
                         <p className="text-[11px] text-[#ECE7DA]/60 leading-normal mb-3">
-                          VIP customer accounts, encrypted OTP credentials, loyalty tiers, and contact information.
+                          VIP customer accounts, encrypted credentials, contact info, and registration details.
                         </p>
                       </div>
                       <button
                         type="button"
-                        id="btn-sync-users-cloud"
+                        id="btn-sync-users-mongo"
                         onClick={handleSyncUsersOnly}
                         disabled={isSyncingData}
                         className="w-full py-2 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[11px] font-semibold text-[#D4AF37] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -2735,11 +3176,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </button>
                     </div>
 
-                    {/* Settings Table Card */}
+                    {/* Settings Collection Card */}
                     <div className="p-4 rounded-xl bg-[#0E0D14] border border-[#D4AF37]/20 flex flex-col justify-between">
                       <div>
                         <div className="flex justify-between items-start mb-2">
-                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">public.store_settings</span>
+                          <span className="font-cinzel text-xs font-bold text-[#ECE7DA]">store_settings</span>
                           <span className="px-2 py-0.5 rounded text-[10px] bg-[#10B981]/15 text-[#10B981] font-mono font-bold">
                             Active
                           </span>
@@ -2750,7 +3191,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </div>
                       <button
                         type="button"
-                        id="btn-sync-shipping-cloud"
+                        id="btn-sync-shipping-mongo"
                         onClick={handleSyncShippingOnly}
                         disabled={isSyncingData}
                         className="w-full py-2 rounded-lg bg-[#14131A] hover:bg-[#D4AF37]/20 border border-[#D4AF37]/30 text-[11px] font-semibold text-[#D4AF37] transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -2762,67 +3203,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </div>
                 </div>
 
-                {/* SQL Schema Script Setup Section */}
+                {/* MongoDB Atlas Setup Guide */}
                 <div className="p-6 rounded-2xl bg-[#0E0D14] border border-[#D4AF37]/25 space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <h4 className="font-cinzel text-sm font-bold text-[#ECE7DA] flex items-center gap-2">
                         <Terminal className="w-4 h-4 text-[#D4AF37]" />
-                        <span>Database Schema & SQL Table Setup</span>
+                        <span>How to Connect MongoDB Atlas in 3 Steps</span>
                       </h4>
                       <p className="text-xs text-[#ECE7DA]/60 mt-1">
-                        Run this SQL script in your Supabase project's SQL Editor to provision all tables and security policies.
+                        Follow these steps to generate your MongoDB Atlas connection string and connect it to Gyutaro Atelier.
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        id="btn-copy-sql-schema"
-                        onClick={handleCopySql}
-                        className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#0A0A0C] text-xs font-bold tracking-wider uppercase hover:bg-[#E8C868] transition-all flex items-center gap-2 cursor-pointer shadow-lg"
-                      >
-                        {copiedSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                        <span>{copiedSql ? 'COPIED TO CLIPBOARD!' : 'COPY SQL SCRIPT'}</span>
-                      </button>
-
-                      <a
-                        href={`https://supabase.com/dashboard/project/${SUPABASE_PROJECT_ID}/sql/new`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3.5 py-2 rounded-xl border border-[#D4AF37]/30 text-xs font-semibold text-[#ECE7DA] hover:bg-[#D4AF37]/10 transition-colors flex items-center gap-1.5"
-                      >
-                        <span>Open Supabase SQL Editor</span>
-                        <ExternalLink className="w-3 h-3 text-[#D4AF37]" />
-                      </a>
-                    </div>
+                    <a
+                      href="https://cloud.mongodb.com"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#0A0A0C] text-xs font-bold tracking-wider uppercase hover:bg-[#F4E5C3] transition-all flex items-center gap-2 cursor-pointer shadow-lg"
+                    >
+                      <span>Open MongoDB Atlas</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-[#0A0A0C]" />
+                    </a>
                   </div>
 
-                  {/* SQL Schema Code Box */}
-                  <div className="relative">
-                    <pre className="p-4 rounded-xl bg-[#08080A] border border-white/10 text-[11px] font-mono text-[#ECE7DA]/85 overflow-x-auto max-h-72 leading-relaxed selection:bg-[#D4AF37] selection:text-[#0A0A0C]">
-                      {SUPABASE_SQL_SCHEMA}
-                    </pre>
-                  </div>
-
-                  {/* 3 Step Guide */}
+                  {/* 3 Step Guide Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-                    <div className="p-3.5 rounded-xl bg-[#14131A] border border-white/5 space-y-1">
+                    <div className="p-4 rounded-xl bg-[#14131A] border border-white/5 space-y-1.5">
                       <span className="text-[10px] font-bold text-[#D4AF37] font-cinzel uppercase block">STEP 1</span>
-                      <p className="text-xs text-[#ECE7DA] font-semibold">Copy the SQL Script</p>
-                      <p className="text-[11px] text-[#ECE7DA]/60">Click the "Copy SQL Script" button above to copy the schema script.</p>
+                      <p className="text-xs text-[#ECE7DA] font-semibold">Create Free Cluster</p>
+                      <p className="text-[11px] text-[#ECE7DA]/60">
+                        Sign up or log in at <strong className="text-[#D4AF37]">mongodb.com</strong> and deploy a free M0 cluster (e.g. AWS / Mumbai / Singapore).
+                      </p>
                     </div>
 
-                    <div className="p-3.5 rounded-xl bg-[#14131A] border border-white/5 space-y-1">
+                    <div className="p-4 rounded-xl bg-[#14131A] border border-white/5 space-y-1.5">
                       <span className="text-[10px] font-bold text-[#D4AF37] font-cinzel uppercase block">STEP 2</span>
-                      <p className="text-xs text-[#ECE7DA] font-semibold">Paste into SQL Editor</p>
-                      <p className="text-[11px] text-[#ECE7DA]/60">Open your Supabase SQL Editor tab and paste the copied SQL query.</p>
+                      <p className="text-xs text-[#ECE7DA] font-semibold">User & Network Access</p>
+                      <p className="text-[11px] text-[#ECE7DA]/60">
+                        Under <em>Database Access</em> create a user (e.g. <strong className="text-[#ECE7DA]">admin</strong>), and under <em>Network Access</em> add IP <strong className="text-[#10B981]">0.0.0.0/0</strong> (Allow Anywhere).
+                      </p>
                     </div>
 
-                    <div className="p-3.5 rounded-xl bg-[#14131A] border border-white/5 space-y-1">
+                    <div className="p-4 rounded-xl bg-[#14131A] border border-white/5 space-y-1.5">
                       <span className="text-[10px] font-bold text-[#D4AF37] font-cinzel uppercase block">STEP 3</span>
-                      <p className="text-xs text-[#ECE7DA] font-semibold">Run & Sync Data</p>
-                      <p className="text-[11px] text-[#ECE7DA]/60">Click "Run", then come back and click "Sync All Data to Cloud".</p>
+                      <p className="text-xs text-[#ECE7DA] font-semibold">Paste Connection String</p>
+                      <p className="text-[11px] text-[#ECE7DA]/60">
+                        Click <em>Connect &gt; Drivers &gt; Node.js</em>, copy the <code className="text-[#D4AF37]">mongodb+srv://...</code> URI, paste it into the box above and click <em>Connect Database</em>.
+                      </p>
                     </div>
                   </div>
                 </div>

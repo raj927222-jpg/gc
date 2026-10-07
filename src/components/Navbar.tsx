@@ -22,7 +22,6 @@ interface NavbarProps {
   onOpenWishlist: () => void;
   onOpenSearch: () => void;
   onOpenAuth: () => void;
-  onOpenAdmin: () => void;
   onReplayIntro?: () => void;
   user: UserAccount | null;
   activeCurrency?: CurrencyConfig;
@@ -42,7 +41,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenWishlist,
   onOpenSearch,
   onOpenAuth,
-  onOpenAdmin,
   onReplayIntro,
   user,
   activeCurrency,

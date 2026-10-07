@@ -35,7 +35,6 @@ import {
   verifyBackendOtp,
   resendBackendOtp,
 } from '../utils/otpApi';
-import { getSupabase } from '../utils/supabaseClient';
 
 const GoogleIcon: React.FC<{ className?: string }> = ({ className = "w-4 h-4" }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none">
