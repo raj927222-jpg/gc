@@ -383,6 +383,7 @@ export const AdminSettingsPage: React.FC = () => {
                   placeholder="mongodb+srv://username:password@cluster... or mongodb://localhost:27017"
                   className="w-full bg-[#181722] border border-[#D4AF37]/30 rounded-xl px-3 py-2 text-[11px] text-[#ECE7DA] font-mono focus:outline-none focus:border-[#D4AF37]"
                 />
+
                 <button
                   type="submit"
                   disabled={isUpdatingMongo || !mongoUriInput.trim()}
@@ -410,12 +411,14 @@ export const AdminSettingsPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Atlas Whitelist Note */}
-              <div className="p-3 rounded-xl bg-[#181722] border border-white/5 text-[10px] text-[#ECE7DA]/60 space-y-1">
-                <span className="text-[#D4AF37] font-semibold block">MongoDB Atlas Step:</span>
-                <p>
-                  In MongoDB Atlas, enable IP access: <strong>Network Access</strong> &rarr; <strong>Add IP Address</strong> &rarr; Select <strong>Allow Access from Anywhere</strong> (<code className="text-[#D4AF37]">0.0.0.0/0</code>) &rarr; <strong>Confirm</strong>.
-                </p>
+              {/* Guidance */}
+              <div className="p-3 rounded-xl bg-[#181722] border border-white/5 text-[10px] text-[#ECE7DA]/70 space-y-1.5">
+                <div>
+                  <span className="text-[#D4AF37] font-semibold block mb-0.5">☁️ MongoDB Atlas Cloud:</span>
+                  <p className="leading-relaxed">
+                    Live cloud database connected. Atlas dashboard me <strong>Network Access</strong> &rarr; <strong>0.0.0.0/0</strong> (Allow from anywhere) set rakhein seamless sync ke liye.
+                  </p>
+                </div>
               </div>
             </form>
           </div>
