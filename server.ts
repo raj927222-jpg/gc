@@ -6,7 +6,7 @@ import http from "http";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { createAndSendOtp, verifyOtpCode } from "./server/otpService";
-import { getMongoDb, getMongoStatus, setMongoUri } from "./server/mongodb";
+import { getMongoDb, getMongoStatus, setMongoUri, seedAllCollections } from "./server/mongodb";
 import { fallbackStore } from "./server/fallbackStore";
 import adminRoutes from "./server/adminRoutes";
 
@@ -274,6 +274,32 @@ async function startServer() {
     }
   });
 
+  app.post("/api/db/orders/sync-all", async (req, res) => {
+    try {
+      const db = await getMongoDb();
+      const { orders } = req.body;
+      if (!Array.isArray(orders)) {
+        return res.status(400).json({ success: false, message: "Orders array is required" });
+      }
+      if (db) {
+        const collection = db.collection("orders");
+        for (const o of orders) {
+          if (o && o.id) {
+            await collection.updateOne(
+              { id: o.id },
+              { $set: { ...o, updatedAt: new Date() } },
+              { upsert: true }
+            );
+          }
+        }
+      }
+      fallbackStore.syncAllOrders(orders);
+      return res.json({ success: true, count: orders.length });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
   // --- REGISTERED USERS ---
   app.get("/api/db/users", async (req, res) => {
     try {
@@ -311,6 +337,44 @@ async function startServer() {
         fallbackStore.saveUser(user);
       }
       return res.json({ success: true, user: user.email });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  app.post("/api/db/users/sync-all", async (req, res) => {
+    try {
+      const db = await getMongoDb();
+      const { users } = req.body;
+      if (!Array.isArray(users)) {
+        return res.status(400).json({ success: false, message: "Users array is required" });
+      }
+      if (db) {
+        const collection = db.collection("registered_users");
+        for (const u of users) {
+          if (u && (u.id || u.email)) {
+            const identifier = u.id ? { id: u.id } : { email: u.email };
+            await collection.updateOne(
+              identifier,
+              { $set: { ...u, updatedAt: new Date() } },
+              { upsert: true }
+            );
+          }
+        }
+      }
+      fallbackStore.syncAllUsers(users);
+      return res.json({ success: true, count: users.length });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // Seed / sync all collections
+  app.post("/api/mongodb/seed-all", async (req, res) => {
+    try {
+      const force = Boolean(req.body?.force);
+      const result = await seedAllCollections(force);
+      return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });
     }
@@ -449,6 +513,12 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    // Auto-seed any empty collections in MongoDB asynchronously
+    seedAllCollections(false).then((res) => {
+      console.log('[MongoDB] Initial collections seed status:', res);
+    }).catch((err) => {
+      console.warn('[MongoDB] Initial collections seed note:', err?.message);
+    });
   });
 }
 

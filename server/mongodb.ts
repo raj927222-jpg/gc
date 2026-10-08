@@ -2,6 +2,12 @@ import { MongoClient, Db, ServerApiVersion } from 'mongodb';
 import fs from 'fs';
 import path from 'path';
 import { fallbackStore } from './fallbackStore';
+import {
+  DEFAULT_ORDERS,
+  DEFAULT_SHIPPING_CONFIG,
+  DEFAULT_ATELIER_INFO,
+  DEFAULT_BRANDING_ASSETS,
+} from './defaultData';
 
 const CONFIG_FILE_PATH = path.join(process.cwd(), 'server', 'mongoConfig.json');
 export const DEFAULT_CLUSTER_HOST = 'cluster0.x70hmm8.mongodb.net';
@@ -196,15 +202,38 @@ export async function getMongoDb(customUri?: string, forceRetry = false): Promis
       console.warn('[MongoDB] Index creation note:', idxErr);
     }
 
-    // Auto-seed if newly connected and products collection is empty
+    // Auto-seed collections if empty
     try {
-      const existingCount = await dbInstance.collection('products').countDocuments();
-      if (existingCount === 0) {
+      // 1. Products
+      const existingProdCount = await dbInstance.collection('products').countDocuments();
+      if (existingProdCount === 0) {
         const initialProducts = fallbackStore.getProducts();
         if (initialProducts.length > 0) {
           await dbInstance.collection('products').insertMany(initialProducts);
           console.log(`[MongoDB] Auto-seeded ${initialProducts.length} initial products to "${dbName}.products"`);
         }
+      }
+
+      // 2. Orders
+      const existingOrderCount = await dbInstance.collection('orders').countDocuments();
+      if (existingOrderCount === 0) {
+        const initialOrders = fallbackStore.getOrders();
+        if (initialOrders.length > 0) {
+          await dbInstance.collection('orders').insertMany(initialOrders);
+          console.log(`[MongoDB] Auto-seeded ${initialOrders.length} initial orders to "${dbName}.orders"`);
+        }
+      }
+
+      // 3. Store Settings
+      const existingSettingsCount = await dbInstance.collection('store_settings').countDocuments();
+      if (existingSettingsCount === 0) {
+        const defaultSettingsRecords = [
+          { key: 'shipping_config', value: DEFAULT_SHIPPING_CONFIG, updatedAt: new Date() },
+          { key: 'atelier_info', value: DEFAULT_ATELIER_INFO, updatedAt: new Date() },
+          { key: 'branding_assets', value: DEFAULT_BRANDING_ASSETS, updatedAt: new Date() },
+        ];
+        await dbInstance.collection('store_settings').insertMany(defaultSettingsRecords);
+        console.log(`[MongoDB] Auto-seeded default store settings to "${dbName}.store_settings"`);
       }
     } catch (seedErr) {
       console.warn('[MongoDB] Auto-seed note:', seedErr);
@@ -391,6 +420,73 @@ export async function setMongoUri(newUri: string): Promise<{ success: boolean; m
       message: err?.message || 'Failed to update MongoDB URI',
     };
   }
+}
+
+export async function seedAllCollections(force = false) {
+  const db = await getMongoDb();
+  if (!db) {
+    return { success: false, message: 'Database not connected' };
+  }
+
+  const results: any = {};
+
+  // 1. Products
+  const prodCount = await db.collection('products').countDocuments();
+  if (force || prodCount === 0) {
+    const products = fallbackStore.getProducts();
+    for (const p of products) {
+      await db.collection('products').updateOne(
+        { id: p.id },
+        { $set: { ...p, updatedAt: new Date() } },
+        { upsert: true }
+      );
+    }
+    results.products = products.length;
+  } else {
+    results.products = prodCount;
+  }
+
+  // 2. Orders
+  const orderCount = await db.collection('orders').countDocuments();
+  if (force || orderCount === 0) {
+    const orders = fallbackStore.getOrders();
+    for (const o of orders) {
+      await db.collection('orders').updateOne(
+        { id: o.id },
+        { $set: { ...o, updatedAt: new Date() } },
+        { upsert: true }
+      );
+    }
+    results.orders = orders.length;
+  } else {
+    results.orders = orderCount;
+  }
+
+  // 3. Store settings
+  const settingsCount = await db.collection('store_settings').countDocuments();
+  if (force || settingsCount === 0) {
+    const shipping = fallbackStore.getSettings() || DEFAULT_SHIPPING_CONFIG;
+    await db.collection('store_settings').updateOne(
+      { key: 'shipping_config' },
+      { $set: { key: 'shipping_config', value: shipping, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    await db.collection('store_settings').updateOne(
+      { key: 'atelier_info' },
+      { $set: { key: 'atelier_info', value: DEFAULT_ATELIER_INFO, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    await db.collection('store_settings').updateOne(
+      { key: 'branding_assets' },
+      { $set: { key: 'branding_assets', value: DEFAULT_BRANDING_ASSETS, updatedAt: new Date() } },
+      { upsert: true }
+    );
+    results.store_settings = 3;
+  } else {
+    results.store_settings = settingsCount;
+  }
+
+  return { success: true, seeded: results };
 }
 
 export { currentMongoUri };

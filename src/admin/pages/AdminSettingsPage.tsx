@@ -34,7 +34,45 @@ export const AdminSettingsPage: React.FC = () => {
   const [mongoFeedback, setMongoFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const handleSyncAllCollections = async () => {
+    setIsSyncingAll(true);
+    setMongoFeedback(null);
+    try {
+      const res = await fetch('/api/mongodb/seed-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: false }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMongoFeedback({
+          type: 'success',
+          message: 'All collections (products, orders, store_settings, users) synced to MongoDB successfully!',
+        });
+      } else {
+        setMongoFeedback({
+          type: 'error',
+          message: data.message || 'Sync failed.',
+        });
+      }
+      // Reload status
+      const mongoRes = await fetch('/api/mongodb/status');
+      if (mongoRes.ok) {
+        const mongoJson = await mongoRes.json();
+        setMongoStatus(mongoJson);
+      }
+    } catch (err: any) {
+      setMongoFeedback({
+        type: 'error',
+        message: err?.message || 'Sync communication error.',
+      });
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
 
   const loadSettings = async () => {
     setIsLoading(true);
@@ -368,6 +406,44 @@ export const AdminSettingsPage: React.FC = () => {
                   {mongoStatus.message}
                 </div>
               )}
+
+              {/* Live Collections Counter */}
+              {mongoStatus?.collections && (
+                <div className="pt-2 border-t border-white/5 space-y-1.5">
+                  <span className="text-[10px] text-[#ECE7DA]/50 uppercase tracking-wider block">Live Collections in Database:</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 rounded-lg bg-[#181722] border border-white/5 flex justify-between items-center">
+                      <span className="text-[11px] text-[#ECE7DA]/70 font-mono">products</span>
+                      <span className="text-xs font-bold text-[#D4AF37] font-mono">{mongoStatus.collections.products ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#181722] border border-white/5 flex justify-between items-center">
+                      <span className="text-[11px] text-[#ECE7DA]/70 font-mono">orders</span>
+                      <span className="text-xs font-bold text-[#D4AF37] font-mono">{mongoStatus.collections.orders ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#181722] border border-white/5 flex justify-between items-center">
+                      <span className="text-[11px] text-[#ECE7DA]/70 font-mono">store_settings</span>
+                      <span className="text-xs font-bold text-[#10B981] font-mono">{mongoStatus.collections.store_settings ?? 0}</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#181722] border border-white/5 flex justify-between items-center">
+                      <span className="text-[11px] text-[#ECE7DA]/70 font-mono">users</span>
+                      <span className="text-xs font-bold text-[#D4AF37] font-mono">{mongoStatus.collections.registered_users ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Sync All Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={handleSyncAllCollections}
+                  disabled={isSyncingAll}
+                  className="w-full py-2 px-3 rounded-xl bg-[#10B981]/15 border border-[#10B981]/40 text-[#10B981] font-bold text-[11px] uppercase tracking-wider hover:bg-[#10B981]/25 transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingAll ? 'Syncing All Collections...' : 'Push / Sync All Data to MongoDB'}</span>
+                </button>
+              </div>
             </div>
 
             {/* MongoDB URI Input & Save Form */}

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { INITIAL_PRODUCTS } from '../src/data/products';
+import { DEFAULT_ORDERS, DEFAULT_SHIPPING_CONFIG } from './defaultData';
 
 const STORE_FILE = path.join(process.cwd(), 'server', 'fallbackStore.json');
 
@@ -16,12 +17,7 @@ export interface FallbackStoreData {
   };
 }
 
-const defaultSettings = {
-  shippingChargesEnabled: true,
-  standardShippingFee: 450,
-  freeShippingThreshold: 15000,
-  shippingLabel: 'Express White-Glove Shipping',
-};
+const defaultSettings = DEFAULT_SHIPPING_CONFIG;
 
 function initStore(): FallbackStoreData {
   try {
@@ -30,7 +26,7 @@ function initStore(): FallbackStoreData {
       const parsed = JSON.parse(content);
       return {
         products: Array.isArray(parsed.products) && parsed.products.length > 0 ? parsed.products : INITIAL_PRODUCTS,
-        orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+        orders: Array.isArray(parsed.orders) && parsed.orders.length > 0 ? parsed.orders : DEFAULT_ORDERS,
         users: Array.isArray(parsed.users) ? parsed.users : [],
         settings: parsed.settings || defaultSettings,
       };
@@ -41,7 +37,7 @@ function initStore(): FallbackStoreData {
 
   const initial: FallbackStoreData = {
     products: INITIAL_PRODUCTS,
-    orders: [],
+    orders: DEFAULT_ORDERS,
     users: [],
     settings: defaultSettings,
   };
@@ -135,10 +131,18 @@ export const fallbackStore = {
     }
     return false;
   },
+  syncAllOrders(orders: any[]): void {
+    inMemoryStore.orders = orders;
+    saveStore(inMemoryStore);
+  },
 
   // USERS
   getUsers(): any[] {
     return inMemoryStore.users;
+  },
+  syncAllUsers(users: any[]): void {
+    inMemoryStore.users = users;
+    saveStore(inMemoryStore);
   },
   saveUser(user: any): any {
     const id = user.id || user.email;
